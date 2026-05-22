@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
 from routers import bills, negotiations, agent
+from routers import email_router
 from database import init_db
 
 app = FastAPI(title="BillFight - Autonomous Negotiation Agent", version="1.0.0")
@@ -23,6 +24,7 @@ async def startup():
 app.include_router(bills.router, prefix="/api/bills", tags=["bills"])
 app.include_router(negotiations.router, prefix="/api/negotiations", tags=["negotiations"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
+app.include_router(email_router.router, prefix="/api/email", tags=["email"])
 
 @app.get("/")
 async def root():
