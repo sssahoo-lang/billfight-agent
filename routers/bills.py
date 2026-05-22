@@ -1,32 +1,87 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-import aiosqlite, json, io
+import aiosqlite
+import json
+import io
 from database import DB_PATH
-from agent_service import parse_bill
+from agent_service import parse_bill, parse_bill_from_image
 import pypdf
 
 router = APIRouter()
 
-def extract_text_from_pdf(file_bytes):
+SUPPORTED_IMAGE_TYPES = {
+    "image/jpeg": "image/jpeg",
+    "image/jpg": "image/jpeg",
+    "image/png": "image/png",
+    "image/gif": "image/gif",
+    "image/webp": "image/webp",
+}
+
+def extract_text_from_pdf(file_bytes: bytes) -> str:
     reader = pypdf.PdfReader(io.BytesIO(file_bytes))
     return "".join(p.extract_text() + "\n" for p in reader.pages).strip()
 
 @router.post("/upload")
 async def upload_bill(file: UploadFile = File(...)):
-    if not file.filename.endswith(('.pdf', '.txt')):
-        raise HTTPException(400, "Only PDF and TXT files supported")
     content = await file.read()
-    raw_text = extract_text_from_pdf(content) if file.filename.endswith('.pdf') else content.decode('utf-8')
-    if not raw_text.strip():
-        raise HTTPException(400, "Could not extract text")
-    extracted = parse_bill(raw_text)
+    content_type = file.content_type or ""
+    filename = file.filename or ""
+    extracted = None
+
+    # Image upload — use Claude vision
+    if content_type in SUPPORTED_IMAGE_TYPES or filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+        media_type = SUPPORTED_IMAGE_TYPES.get(content_type, "image/jpeg")
+        try:
+            extracted = parse_bill_from_image(content, media_type)
+        except Exception as e:
+            raise HTTPException(400, f"Could not read image: {str(e)}")
+
+    # PDF upload — extract text then parse
+    elif filename.lower().endswith('.pdf') or content_type == "application/pdf":
+        try:
+            raw_text = extract_text_from_pdf(content)
+            if not raw_text.strip():
+                raise HTTPException(400, "Could not extract text from PDF")
+            extracted = parse_bill(raw_text)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"Could not read PDF: {str(e)}")
+
+    # Text upload
+    elif filename.lower().endswith('.txt') or 'text' in content_type:
+        raw_text = content.decode('utf-8')
+        extracted = parse_bill(raw_text)
+
+    else:
+        raise HTTPException(400, "Supported formats: JPG, PNG, WEBP, PDF, TXT")
+
     if not extracted:
-        raise HTTPException(500, "Could not parse bill")
+        raise HTTPException(500, "Could not parse bill data")
+
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("INSERT INTO bills (filename, provider, current_amount, account_tenure, contract_end, bill_type, raw_text, extracted_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (file.filename, extracted.get('provider','Unknown'), float(extracted.get('current_amount',0)), extracted.get('account_tenure','Unknown'), extracted.get('contract_end'), extracted.get('bill_type','other'), raw_text[:5000], json.dumps(extracted)))
+        cursor = await db.execute("""
+            INSERT INTO bills (filename, provider, current_amount, account_tenure,
+                             contract_end, bill_type, raw_text, extracted_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            filename,
+            extracted.get('provider', 'Unknown'),
+            float(extracted.get('current_amount', 0)),
+            extracted.get('account_tenure', 'Unknown'),
+            extracted.get('contract_end'),
+            extracted.get('bill_type', 'other'),
+            f"Image upload: {filename}" if content_type in SUPPORTED_IMAGE_TYPES else "",
+            json.dumps(extracted)
+        ))
         bill_id = cursor.lastrowid
         await db.commit()
-    return {"bill_id": bill_id, "extracted": extracted, "message": "Bill parsed successfully"}
+
+    return {
+        "bill_id": bill_id,
+        "extracted": extracted,
+        "message": "Bill parsed successfully",
+        "method": "vision" if content_type in SUPPORTED_IMAGE_TYPES else "text"
+    }
 
 @router.get("/")
 async def list_bills():
@@ -41,7 +96,9 @@ async def get_bill(bill_id: int):
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM bills WHERE id = ?", (bill_id,)) as cursor:
             row = await cursor.fetchone()
-            if not row: raise HTTPException(404, "Not found")
+            if not row:
+                raise HTTPException(404, "Not found")
             data = dict(row)
-            if data.get('extracted_data'): data['extracted_data'] = json.loads(data['extracted_data'])
+            if data.get('extracted_data'):
+                data['extracted_data'] = json.loads(data['extracted_data'])
             return data

@@ -196,3 +196,45 @@ Key steps: {json.dumps([s.get('step_type') for s in steps])}"""
         }]
     )
     return response.content[0].text
+
+
+def parse_bill_from_image(image_bytes: bytes, media_type: str) -> dict:
+    """Use Claude vision to extract bill data from an image."""
+    import base64
+    image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=1000,
+        system="""You are a bill parsing expert. Extract structured data from bill images.
+Return ONLY a JSON object with these exact fields:
+{
+  "provider": "company name",
+  "bill_type": "internet/phone/insurance/subscription/rent/utility/other",
+  "current_amount": 99.99,
+  "account_tenure": "2 years 3 months",
+  "contract_end": "March 2025 or null",
+  "account_number": "last 4 digits or null",
+  "services": ["list of services included"],
+  "payment_history": "good/unknown",
+  "key_details": "any other important details"
+}
+No preamble. No markdown. JSON only.""",
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": image_data,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": "Extract all billing information from this bill image."
+                }
+            ],
+        }]
+    )
+    return extract_json(response.content[0].text)
