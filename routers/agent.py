@@ -66,7 +66,10 @@ async def start_negotiation(request: StartNegotiationRequest, background_tasks: 
 async def simulate_reply(request: SimulateReplyRequest, background_tasks: BackgroundTasks):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM negotiations WHERE id = ?", (request.negotiation_id,)) as cursor:
+        async with db.execute(
+            "SELECT n.*, b.current_amount FROM negotiations n JOIN bills b ON n.bill_id = b.id WHERE n.id = ?",
+            (request.negotiation_id,),
+        ) as cursor:
             neg = await cursor.fetchone()
             if not neg: raise HTTPException(404, "Not found")
             neg = dict(neg)
@@ -78,7 +81,13 @@ async def simulate_reply(request: SimulateReplyRequest, background_tasks: Backgr
         decision = interpretation.get('decision', 'close')
         offered = interpretation.get('offered_amount', 0)
         if decision == 'accept':
-            savings = float(neg.get('walkaway_threshold') or 0) - offered if offered > 0 else 0
+            current = float(neg.get('current_amount') or 0)
+            if offered > 0 and current > 0:
+                savings = max(0, current - offered)
+            elif current > 0 and neg.get('target_price'):
+                savings = max(0, current - float(neg['target_price']))
+            else:
+                savings = 0
             await update_status(db, request.negotiation_id, "won", savings_achieved=savings)
             await add_step(db, request.negotiation_id, "closed", {"outcome": "won", "final_amount": offered}, "Accepted offer", "DEAL CLOSED")
         elif decision == 'counter':
