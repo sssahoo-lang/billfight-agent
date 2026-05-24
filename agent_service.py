@@ -3,7 +3,7 @@ import json
 import re
 from typing import Optional
 
-client = anthropic.Anthropic()
+client = anthropic.Anthropic(timeout=30.0)
 MODEL = "claude-sonnet-4-20250514"
 
 
@@ -135,10 +135,14 @@ Round: {round_num}"""
         max_tokens=1500,
         system="""You are an expert negotiator drafting customer retention emails.
 Write professional, firm but polite emails that cite specific competitor prices.
+IMPORTANT: Always include the customer's full account number, full name, and specific plan details from the bill data.
+Never use placeholders like [Customer Name] or "Account #1503 Customer".
+Use the EXACT full name and EXACT full account number from the bill_data provided.
+Sign the email with the real customer name. End with full account number in the signature.
 Return ONLY a JSON object:
 {
   "subject": "email subject line",
-  "body": "full email body",
+  "body": "full email body with real account details",
   "key_arguments_used": ["list of main points made"],
   "ask_amount": 49.99,
   "reasoning": "why this approach for this round"

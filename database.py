@@ -18,12 +18,23 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 bill_id INTEGER, status TEXT DEFAULT 'researching',
                 target_price REAL, walkaway_threshold REAL, savings_achieved REAL DEFAULT 0,
+                best_offer_received REAL DEFAULT NULL,
+                rounds_count INTEGER DEFAULT 0,
                 research_findings TEXT, strategy TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (bill_id) REFERENCES bills(id)
             )
         """)
+        # Migrate existing DB — add columns if they don't exist yet
+        try:
+            await db.execute("ALTER TABLE negotiations ADD COLUMN best_offer_received REAL DEFAULT NULL")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE negotiations ADD COLUMN rounds_count INTEGER DEFAULT 0")
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS negotiation_steps (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

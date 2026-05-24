@@ -11,7 +11,7 @@ import {
   STEP_CODES,
   STEP_LABELS,
 } from "./constants.js";
-import { getMonthlySavings } from "./utils/savings.js";
+import { getMonthlySavings, getBestOfferSavings } from "./utils/savings.js";
 
 function providerInitials(name) {
   if (!name) return "?";
@@ -442,18 +442,23 @@ function NegotiationDetail({ negotiation, onBack, onRefresh, onRestart, onDelete
             steps.length === 0 ? (
               <p style={{ color: "var(--text-muted)" }}>Agent is working…</p>
             ) : (
-              <div className="timeline">
-                {steps.map((step) => (
-                  <StepCard
-                    key={step.id}
-                    step={step}
-                    onCopyEmail={(c) => {
-                      navigator.clipboard.writeText(`Subject: ${c.subject}\n\n${c.body}`);
-                      showToast("Email copied");
-                    }}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="timeline">
+                  {steps.map((step) => (
+                    <StepCard
+                      key={step.id}
+                      step={step}
+                      onCopyEmail={(c) => {
+                        navigator.clipboard.writeText(`Subject: ${c.subject}\n\n${c.body}`);
+                        showToast("Email copied");
+                      }}
+                    />
+                  ))}
+                </div>
+                {["won","closed_no_deal","awaiting_reply"].includes(negotiation.status) && (
+                  <NegotiationOutcomeCard negotiation={negotiation} />
+                )}
+              </>
             )
           )}
           {tab === "actions" && (
@@ -750,10 +755,14 @@ function NegotiationsTable({ negotiations, loading, filter, sort, search, onOpen
                 <td><StatusBadge status={n.status} /></td>
                 <td>
                   {"$" + n.current_amount + "/mo"}
-                  {n.target_price ? " → $" + n.target_price : ""}
+                  {n.best_offer_received
+                    ? <span style={{color:"#4ade80"}}> → ${Math.round(n.best_offer_received)}/mo</span>
+                    : n.target_price ? " → $" + n.target_price : ""}
                 </td>
-                <td className={getMonthlySavings(n) > 0 ? "savings-cell" : ""}>
-                  {getMonthlySavings(n) > 0 ? "−$" + getMonthlySavings(n).toFixed(0) + "/mo" : "—"}
+                <td className={Math.max(getMonthlySavings(n), getBestOfferSavings(n)) > 0 ? "savings-cell" : ""}>
+                  {Math.max(getMonthlySavings(n), getBestOfferSavings(n)) > 0
+                    ? "−$" + Math.max(getMonthlySavings(n), getBestOfferSavings(n)).toFixed(0) + "/mo"
+                    : "—"}
                 </td>
                 <td>
                   <div className="table-actions">
@@ -820,6 +829,92 @@ const BACK_LABELS = {
   upload: "New bill",
   settings: "Settings",
 };
+
+
+function OutcomeStat({ label, value, highlight }) {
+  return (
+    <div style={{
+      background: highlight ? "rgba(74,222,128,0.07)" : "rgba(255,255,255,0.03)",
+      border: "1px solid " + (highlight ? "rgba(74,222,128,0.18)" : "rgba(255,255,255,0.07)"),
+      borderRadius: 8, padding: "10px 12px",
+    }}>
+      <div style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: highlight ? "#4ade80" : "var(--text-primary, #fff)", fontFamily: "monospace" }}>{value}</div>
+    </div>
+  );
+}
+
+function NegotiationOutcomeCard({ negotiation }) {
+  const [copied, setCopied] = React.useState(false);
+  const original = Number(negotiation.current_amount) || 0;
+  const best = negotiation.best_offer_received != null ? Number(negotiation.best_offer_received) : null;
+  const savings = Number(negotiation.savings_achieved) || 0;
+  const dealClosed = negotiation.status === "won" && savings > 0;
+  const hasOffer = best !== null;
+  const savingsMonth = hasOffer ? Math.round(original - best) : 0;
+  const savingsYear = savingsMonth * 12;
+  const savingsPct = original > 0 && hasOffer ? Math.round((savingsMonth / original) * 100) : 0;
+  const rounds = negotiation.rounds_count || 0;
+  const statusMap = {
+    won: { label: "Deal accepted", dot: "#4ade80" },
+    closed_no_deal: { label: "Closed — no deal", dot: "#f87171" },
+    awaiting_reply: { label: "Offer pending", dot: "#fbbf24" },
+  };
+  const sc = statusMap[negotiation.status] || { label: negotiation.status, dot: "#71717a" };
+  const fmt = (n) => n != null ? "$" + Math.round(n).toLocaleString() : "—";
+  const handleCopy = () => {
+    const lines = [
+      negotiation.provider + " — RatePilot Negotiation",
+      "Original: " + fmt(original) + "/mo",
+      hasOffer ? "Best offer: " + fmt(best) + "/mo" : "No offer received",
+      hasOffer ? "Savings: " + fmt(savingsMonth) + "/mo · " + fmt(savingsYear) + "/yr (" + savingsPct + "% off)" : "",
+      "Status: " + sc.label,
+      "Rounds: " + rounds,
+    ].filter(Boolean).join("\n");
+    navigator.clipboard.writeText(lines);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "18px 20px", marginTop: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "var(--text-muted)" }}>NEGOTIATION OUTCOME</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: sc.dot, background: sc.dot + "20", padding: "2px 8px", borderRadius: 20 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: sc.dot, display: "inline-block" }} />
+            {sc.label}
+          </span>
+          {rounds > 0 && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{rounds} round{rounds !== 1 ? "s" : ""}</span>}
+        </div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={handleCopy} style={{ fontSize: 11 }}>
+          {copied ? "Copied!" : "Copy summary"}
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8, marginBottom: 14 }}>
+        <OutcomeStat label="Original bill" value={fmt(original) + "/mo"} />
+        <OutcomeStat label={hasOffer ? "Best offer" : "No offer"} value={hasOffer ? fmt(best) + "/mo" : "—"} highlight={hasOffer} />
+        {hasOffer && <OutcomeStat label="Monthly savings" value={"−" + fmt(savingsMonth) + "/mo"} highlight />}
+        {hasOffer && <OutcomeStat label="Annual savings" value={fmt(savingsYear) + "/yr"} highlight />}
+        {hasOffer && <OutcomeStat label="Reduction" value={savingsPct + "%"} highlight />}
+      </div>
+      {hasOffer && !dealClosed && (
+        <div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#4ade80", lineHeight: 1.5 }}>
+          💡 <strong>{negotiation.provider}</strong> offered <strong>{fmt(best)}/mo</strong> — saving you <strong>{fmt(savingsYear)}/year</strong>. This offer is still on the table. Call their retention line to lock it in.
+        </div>
+      )}
+      {dealClosed && (
+        <div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#4ade80", lineHeight: 1.5 }}>
+          ✅ Deal closed — saving <strong>{fmt(savings)}/mo</strong> · <strong>{fmt(savings * 12)}/year</strong>.
+        </div>
+      )}
+      {!hasOffer && (
+        <div style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#fbbf24", lineHeight: 1.5 }}>
+          ⚠️ No concrete offer was made. Try calling {negotiation.provider} directly — phone agents have more flexibility.
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function App() {
   const [view, setView] = useState("dashboard");
@@ -896,7 +991,7 @@ export default function App() {
   }, [selected, fetchNegotiation, autoRefresh]);
 
   const total = negotiations.length;
-  const totalSavings = negotiations.reduce((a, n) => a + getMonthlySavings(n), 0);
+  const totalSavings = negotiations.reduce((a, n) => a + Math.max(getMonthlySavings(n), getBestOfferSavings(n)), 0);
   const won = negotiations.filter((n) => n.status === "won").length;
   const active = negotiations.filter((n) => !["won", "closed_no_deal"].includes(n.status)).length;
   const closed = negotiations.filter((n) => n.status === "closed_no_deal").length;

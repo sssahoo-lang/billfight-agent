@@ -11,3 +11,13 @@ export function getMonthlySavings(n) {
   }
   return 0;
 }
+
+/** Best offer savings — shown even when no deal was formally closed. */
+export function getBestOfferSavings(n) {
+  const best = Number(n?.best_offer_received);
+  const current = Number(n?.current_amount);
+  if (best > 0 && current > 0 && current > best) {
+    return current - best;
+  }
+  return 0;
+}
