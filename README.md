@@ -64,7 +64,7 @@ npm run dev
 
 ## Demo walkthrough
 
-1. Open http://localhost:5173
+1. Open https://meek-tartufo-0c3f73.netlify.app/
 2. Click **Upload bill** 
 3. Upload `sample_bill.txt` (included) or your own bill PDF
 4. Click **Launch negotiation agent**
@@ -75,20 +75,4 @@ npm run dev
    - `"Unfortunately our pricing is fixed and we cannot offer discounts"`
 7. Agent interprets the reply, decides next move, drafts counter if needed
 
-## Interview talking points
 
-- **Agentic loop design**: stateful multi-step pipeline with async reply monitoring
-- **Grounded reasoning**: agent's strategy is backed by live web-searched data, not hallucination
-- **Decision logic**: explicit accept/counter/escalate logic with confidence scoring
-- **Async state management**: Celery-ready architecture, SQLite state persistence
-- **Audit trail**: every agent decision logged with reasoning for full transparency
-- **Claude tool use**: web_search tool for live competitor research
-
-## Extending this
-
-- Add Gmail API integration to send/receive emails autonomously
-- Add Celery + Redis for true async background processing  
-- Add user auth (JWT) for multi-user support
-- Deploy to AWS EC2 + RDS PostgreSQL
-- Add ML model to predict negotiation success probability
-- Support multiple bills in parallel
